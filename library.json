@@ -1,0 +1,17 @@
+{
+    "name": "OTA_Update_Manager",
+    "keywords": "FreeRTOS, ESP32, frameworks",
+    "description": "LINE notify library for ESP8266 & ESP32",
+    "homepage": "https://github.com/kittipon-neware/ota_update_manager",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/kittipon-neware/ota_update_manager"
+    },
+    "version": "0.0.1",
+    "authors": {
+        "name": "k_basic",
+        "url": "https://github.com/kittipon-neware"
+    },
+    "frameworks": "arduino",
+    "platforms": "esp8266, esp32"
+}
