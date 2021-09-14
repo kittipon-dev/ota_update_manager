@@ -1,12 +1,61 @@
+/*
+์website: ota.neware.dev
+*/
+
 #include "ota_update_manager.h"
 
-String hostname = "http://34.87.6.251";
-String _version = "1";
+String _version = "";
+String _hostname = "";
+String _token = "";
 
 String filename = "";
+String _size = "";
+
+int state_code = 0;
 
 OTA_Manager::OTA_Manager()
 {
+}
+
+void OTA_Manager::setup(String version, String hostname, String token)
+{
+    _version = version;
+    _token = token;
+    _hostname = hostname;
+    Serial.println();
+    Serial.println("This_version : " + version);
+    Serial.println("token : " + token);
+    Serial.println("hostname : " + hostname);
+    Serial.println();
+}
+
+void OTA_Manager::run()
+{
+    Serial.println("OTA: GET...");
+    if (!getVersion())
+    {
+        if (state_code != 0)
+        {
+            Serial.println("OTA: DOWNLOAD...");
+            if (getFileCode(SPIFFS))
+            {
+                Serial.println("OTA: UPDATA...");
+                UPDATE(SPIFFS);
+            }
+            else
+            {
+                if (state_code == 1)
+                {
+                    Serial.println("OTA: UPDATA...");
+                    UPDATE(SPIFFS);
+                }
+            }
+        }
+        else
+        {
+            Serial.println("OTA: Can't Start Download");
+        }
+    }
 }
 
 void performUpdate(Stream &updateSource, size_t updateSize)
@@ -59,7 +108,7 @@ void OTA_Manager::UPDATE(fs::FS &fs)
     {
         if (updateBin.isDirectory())
         {
-            Serial.println("Error, update.bin is not a file");
+            Serial.println("Error,  is not a file");
             updateBin.close();
             return;
         }
@@ -77,71 +126,15 @@ void OTA_Manager::UPDATE(fs::FS &fs)
         }
 
         updateBin.close();
-
-        // whe finished remove the binary from sd card to indicate end of the process
         fs.remove("/" + filename);
+        ESP.restart();
     }
     else
     {
-        Serial.println("Could not load update.bin from sd root");
+        Serial.println("Could not load");
     }
 }
-
-void OTA_Manager::listSPIFFS()
-{
-    Serial.println(F("\r\nListing SPIFFS files:"));
-    static const char line[] PROGMEM = "=================================================";
-    Serial.println(FPSTR(line));
-    Serial.println(F("  File name                              Size"));
-    Serial.println(FPSTR(line));
-
-    fs::File root = SPIFFS.open("/");
-    if (!root)
-    {
-        Serial.println(F("Failed to open directory"));
-        return;
-    }
-    if (!root.isDirectory())
-    {
-        Serial.println(F("Not a directory"));
-        return;
-    }
-
-    fs::File file = root.openNextFile();
-    while (file)
-    {
-
-        if (file.isDirectory())
-        {
-            Serial.print("DIR : ");
-            String fileName = file.name();
-            Serial.print(fileName);
-        }
-        else
-        {
-            String fileName = file.name();
-            Serial.print("  " + fileName);
-            // File path can be 31 characters maximum in SPIFFS
-            int spaces = 33 - fileName.length(); // Tabulate nicely
-            if (spaces < 1)
-                spaces = 1;
-            while (spaces--)
-                Serial.print(" ");
-            String fileSize = (String)file.size();
-            spaces = 10 - fileSize.length(); // Tabulate nicely
-            if (spaces < 1)
-                spaces = 1;
-            while (spaces--)
-                Serial.print(" ");
-            Serial.println(fileSize + " bytes");
-        }
-        file = root.openNextFile();
-    }
-    Serial.println(FPSTR(line));
-    Serial.println();
-}
-
-bool OTA_Manager::getFileCode()
+bool OTA_Manager::getFileCode(fs::FS &fs)
 {
     if (!SPIFFS.begin(true))
     {
@@ -151,23 +144,35 @@ bool OTA_Manager::getFileCode()
     }
     if (SPIFFS.exists("/" + filename) == true)
     {
-        Serial.println("OTA: Found " + filename);
-        return 0;
+        File file = SPIFFS.open("/" + filename);
+        if (String(file.size()) == _size)
+        {
+            Serial.println("OTA: Found " + filename);
+            state_code = 1;
+            return 0;
+        }
     }
-    Serial.println("OTA: Download... " + filename);
+    Serial.println("OTA: Start...Download... " + filename);
     if ((WiFi.status() == WL_CONNECTED))
     {
         HTTPClient http;
-        http.begin(hostname + "/code_bin/" + filename);
+        http.begin(_hostname + "/code_bin/" + filename);
         Serial.println("OTA: [HTTP] GET...");
         int httpCode = http.GET();
         if (httpCode > 0)
         {
-            fs::File f = SPIFFS.open("/" + filename, "w+");
+            fs::File f = SPIFFS.open("/" + filename, FILE_WRITE);
             if (!f)
             {
-                Serial.println("OTA: file open failed");
-                return 0;
+                if (fs.remove("/" + filename))
+                {
+                }
+                else
+                {
+                    Serial.println("OTA: file open failed");
+                    state_code = 0;
+                    return 0;
+                }
             }
             if (httpCode == HTTP_CODE_OK)
             {
@@ -175,7 +180,7 @@ bool OTA_Manager::getFileCode()
                 int len = total;
                 uint8_t buff[128] = {0};
                 WiFiClient *stream = http.getStreamPtr();
-                Serial.println("OTA: loading...");
+                Serial.print("OTA: loading...");
                 while (http.connected() && (len > 0 || len == -1))
                 {
                     size_t size = stream->available();
@@ -187,11 +192,12 @@ bool OTA_Manager::getFileCode()
                         {
                             len -= c;
                         }
+                        Serial.println(len);
                     }
                     yield();
                 }
                 Serial.println();
-                Serial.print("OTA: [HTTP] connection closed or file end.\n");
+                Serial.print("OTA: Download Successful\n");
             }
             f.close();
         }
@@ -200,18 +206,23 @@ bool OTA_Manager::getFileCode()
             Serial.printf("OTA: [HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
         }
         http.end();
+        Serial.println("OTA: OK");
+    }
+    else
+    {
+        Serial.println("OTA:(erro) Can't Download File");
     }
     return 1;
 }
 
-bool OTA_Manager::getVersion(String token)
+bool OTA_Manager::getVersion()
 {
     Serial.println();
     Serial.println("OTA: getVersion...");
     if ((WiFi.status() == WL_CONNECTED))
     {
         HTTPClient http;
-        http.begin(hostname + "/get_version?token=" + token);
+        http.begin(_hostname + "/get_version?token=" + _token);
         int httpCode = http.GET();
         if (httpCode > 0)
         {
@@ -221,24 +232,40 @@ bool OTA_Manager::getVersion(String token)
             for (int i = 0; i < str.length(); i++)
             {
                 if (str[i] == '~')
-                    s = 1;
+                {
+                    s++;
+                }
+
                 if (s == 0)
                     versionname += str[i];
                 else if (s == 1 && str[i] != '~')
                     filename += str[i];
+                else if (s == 2 && str[i] != '~')
+                    _size += str[i];
             }
-            Serial.println("version_name: " + versionname);
-            Serial.println("filename: " + filename);
+            Serial.println("OTA: version_name: " + versionname);
+            Serial.println("OTA: filename: " + filename + "  size: " + _size);
+            Serial.println();
             if (versionname == _version)
             {
                 Serial.println("OTA: Code OK");
                 http.end();
+                state_code = 0;
                 return 1;
             }
             else
             {
                 Serial.println("OTA: Code not current");
+                Serial.println();
                 http.end();
+                if (versionname != "")
+                {
+                    state_code = 1;
+                }
+                else
+                {
+                    state_code = 0;
+                }
                 return 0;
             }
         }
